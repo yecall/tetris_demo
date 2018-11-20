@@ -10,3 +10,18 @@
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+
+# Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
+.glide/
+
+# ide
+.idea/
+
+# .iml file created by IDEA for module 
+*.iml
+
+# test dir
+test/
+
+# doc dir
+doc/
