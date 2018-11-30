@@ -128,7 +128,7 @@ func demo(ctx *cli.Context) error {
 
 	go func() { //模拟crash几个节点
 		for c:=uint(0); c<crashNumber; c++ {
-			time.Sleep(time.Duration(rand.Intn(1000)+500) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(2000)+1000) * time.Millisecond)
 			nodes[rand.Intn(int(nodeNumber))].Stop()
 		}
 	}()
