@@ -3,18 +3,18 @@ Tetris Demo
 
 This is a demo for Tetris algorithm. 
 
-The demo simulate N nodes on a single machine, every node has an account with initial balance of 100000, and every node issue transactions to transfer random tokens to randoem other nodes. 
+The demo simulate N nodes on a single machine, every node has an account with initial balance of 100000, and every node issue transactions to transfer random tokens to random other nodes. 
 
-Every node maintain a mini blockchain with account state and blocks generated according the consensus output of Tetris.
+Every node maintain a mini blockchain with account states and blocks generated according the consensus output of Tetris.
 
 At the end of the demo, we can see account state of every node are consistent at the same block height.
 
 
-##Installation
+## Installation
 
 go get -u github.com/yeeco/tetris_demo
 
-##Usage
+## Usage
 ```
 cd tetris_demo
 go run main.go
@@ -26,7 +26,7 @@ go run main.go
             //If c>n/3, then remain nodes can not reach consensus.
 ```
 
-##Example
+## Example
 ```
 xujiajundeiMac:yeeco xujiajun$ cd tetris_demo
 xujiajundeiMac:tetris_demo xujiajun$ go run main.go
@@ -59,10 +59,10 @@ Node:9  Height:112    111803    113734    104776     96668    101320     97957  
 Txs confirmed: 256553  Time: 13.433156047  Tps: 19098 
 ```
 Height(Txs) show how many txs have been packed into a block at specific height.  
-We can see at the same height of 112, every nodes's state of accounts balance are consistent.
+We can see at the same height of 112, every node's state of accounts are consistent.
 
-##Comments
-1. Tetris algorithm here is incomplete and just for demo purpose. The full function Tetris source code will open sourced after mainnet released.
+## Comments
+1. Tetris algorithm here is incomplete and just for demo purpose. The full function Tetris source code will be open sourced after mainnet released.
 
 2. The demo mainly show the performance of consensus computing, we omitted all the signature/verification of events and txs.
 
