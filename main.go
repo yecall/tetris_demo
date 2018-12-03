@@ -26,24 +26,27 @@ import (
 	"runtime"
 	"sync"
 
+	"fmt"
+	"math/rand"
+	//"os/signal"
+	"reflect"
+	"strconv"
+	//"syscall"
+	"time"
+
 	"github.com/urfave/cli"
 	"github.com/yeeco/gyee/utils/logging"
 	"github.com/yeeco/tetris_demo/node"
-	"reflect"
-	"fmt"
-	"strconv"
-	"time"
-	"math/rand"
 )
 
 var (
-	app        = cli.NewApp()
-	nodeNumber uint
-	txsNumber  uint
+	app         = cli.NewApp()
+	nodeNumber  uint
+	txsNumber   uint
 	crashNumber uint
-	rps        uint
-	nodes      []*node.Node
-	wg         sync.WaitGroup
+	rps         uint
+	nodes       []*node.Node
+	wg          sync.WaitGroup
 )
 
 func init() {
@@ -57,13 +60,13 @@ func init() {
 		cli.UintFlag{
 			Name:        "txsnum, tx",
 			Usage:       "Demo transactions number",
-			Value:       30000,
+			Value:       50000,
 			Destination: &txsNumber,
 		},
 		cli.UintFlag{
-			Name: "crash, c",
-			Usage:"Node crash number",
-			Value: 0,
+			Name:        "crash, c",
+			Usage:       "Node crash number",
+			Value:       0,
 			Destination: &crashNumber,
 		},
 		cli.UintFlag{
@@ -101,7 +104,7 @@ func demo(ctx *cli.Context) error {
 
 		fmt.Printf("\n%14s", "")
 		for i := uint(0); i < nodeNumber; i++ {
-			fmt.Printf("node%-6d", i )
+			fmt.Printf("node%-6d", i)
 		}
 		fmt.Println()
 		remaining := len(cases)
@@ -114,7 +117,7 @@ func demo(ctx *cli.Context) error {
 			}
 			if value.Interface().(bool) {
 				fmt.Print("\rHeight(Txs):")
-				for i := uint(0); i<nodeNumber; i++ {
+				for i := uint(0); i < nodeNumber; i++ {
 					h := len(nodes[i].Blockchain)
 					if h > 0 {
 						str := fmt.Sprint("(", len(nodes[i].Blockchain[h-1].Tansactions), ")")
@@ -127,28 +130,43 @@ func demo(ctx *cli.Context) error {
 	}()
 
 	go func() { //模拟crash几个节点
-		for c:=uint(0); c<crashNumber; c++ {
+		for c := uint(0); c < crashNumber; c++ {
 			time.Sleep(time.Duration(rand.Intn(2000)+1000) * time.Millisecond)
 			nodes[rand.Intn(int(nodeNumber))].Stop()
 		}
 	}()
 
+	//go func() {
+	//	sigc := make(chan os.Signal, 1)
+	//	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
+	//	defer signal.Stop(sigc)
+	//	<-sigc
+	//	logging.Logger.Info("Got interrupt, shutting down...")
+	//	for c := uint(0); c < nodeNumber; c++ {
+	//		fmt.Println(
+	//			"node", c,
+	//			" eventCh", len(nodes[c].Tetris.EventCh),
+	//			" sendCh",  len(nodes[c].Tetris.SendEventCh),
+	//			" txCh",    len(nodes[c].Tetris.TxsCh))
+	//	}
+	//}()
+
 	wg.Wait()
 
 	fmt.Println("\n")
 	fmt.Print("                      ")
-	for j := uint(0); j<nodeNumber; j++ {
+	for j := uint(0); j < nodeNumber; j++ {
 		fmt.Print("balance", j, "  ")
 	}
 	fmt.Println("")
 
-	for i := uint(0); i<nodeNumber; i++ {
+	for i := uint(0); i < nodeNumber; i++ {
 		states := nodes[i].States
 		h := len(nodes[i].Blockchain)
 		fmt.Printf("%s%-2d%s%3d   ", "Node:", i, " Height:", h)
-		for j := uint(0); j<nodeNumber; j++ {
+		for j := uint(0); j < nodeNumber; j++ {
 			state := states[strconv.Itoa(int(j))]
-			fmt.Printf("%7d   ",state.Balance)
+			fmt.Printf("%7d   ", state.Balance)
 		}
 		fmt.Println()
 	}
@@ -159,7 +177,7 @@ func demo(ctx *cli.Context) error {
 	}
 
 	txsum := 0
-	for i:=0; i<h; i++ {
+	for i := 0; i < h; i++ {
 		txsum += len(nodes[0].Blockchain[i].Tansactions)
 	}
 	start := nodes[0].Blockchain[0].Timestamp

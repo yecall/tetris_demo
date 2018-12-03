@@ -52,7 +52,7 @@ type Node struct {
 	memberAddr map[uint]string
 
 	p2p    p2p.Service
-	tetris *tetris.Tetris
+	Tetris *tetris.Tetris
 	lock   sync.RWMutex
 	wg     *sync.WaitGroup
 	Report chan bool
@@ -61,7 +61,7 @@ type Node struct {
 	subscriberEvent *p2p.Subscriber
 	subscriberTx    *p2p.Subscriber
 
-	States     map[string]State
+	States     map[string]*State
 	Blockchain []Block
 
 	running bool
@@ -93,11 +93,11 @@ func NewNode(id, number uint) (*Node, error) {
 	if err != nil {
 		logging.Logger.Fatal("create tetris err ", err)
 	}
-	node.tetris = tetris
+	node.Tetris = tetris
 
-	node.States = make(map[string]State)
+	node.States = make(map[string]*State)
 	for i := uint(0); i < number; i++ {
-		node.States[memberAddr[i]] = State{0, 100000}
+		node.States[memberAddr[i]] = &State{0, 100000}
 	}
 
 	node.Blockchain = make([]Block, 0)
@@ -124,7 +124,7 @@ func (n *Node) Start(wg *sync.WaitGroup) error {
 	n.p2p.Register(n.subscriberEvent)
 	n.p2p.Register(n.subscriberTx)
 	n.p2p.Start()
-	n.tetris.Start()
+	n.Tetris.Start()
 
 	go n.loop()
 
@@ -139,10 +139,17 @@ func (n *Node) Stop() error {
 		return nil
 	}
 	n.running = false
+	for len(n.subscriberEvent.MsgChan) > 0 {
+		<-n.subscriberEvent.MsgChan
+	}
+	for len(n.subscriberTx.MsgChan) > 0 {
+		<-n.subscriberTx.MsgChan
+	}
+
 	n.p2p.UnRegister(n.subscriberEvent)
 	n.p2p.UnRegister(n.subscriberTx)
 	n.p2p.Stop()
-	n.tetris.Stop()
+	n.Tetris.Stop()
 	//logging.Logger.Info("Node ", n.name, " Stop...")
 	close(n.stop)
 	return nil
@@ -173,7 +180,7 @@ func (n *Node) loop() {
 			//logging.Logger.Info("Node loop end.")
 			n.wg.Done()
 			return
-		case output := <-n.tetris.OutputCh:
+		case output := <-n.Tetris.OutputCh:
 			states := n.States
 			block := Block{make([]string, 0), time.Now()}
 			//fmt.Println("new block")
@@ -184,17 +191,10 @@ func (n *Node) loop() {
 				to := strs[2]
 				balance, _ := strconv.ParseUint(strs[3], 10, 64)
 				//fmt.Println(string(tx), " ", strs, " ", nonce, " ", from, " ", to, " ", balance)
-				state := states[from]
-				if nonce > state.Nonce {
-					//if nonce - state.Nonce > 1 {
-					//	fmt.Println(from, " ", nonce, " > ", state.Nonce)
-					//}
-					state.Nonce = nonce
-					state.Balance -= balance
-					states[from] = state
-					state = states[to]
-					state.Balance += balance
-					states[to] = state
+				if nonce > states[from].Nonce {
+					states[from].Nonce = nonce
+					states[from].Balance -= balance
+					states[to].Balance += balance
 					block.Tansactions = append(block.Tansactions, string(tx))
 				} else {
 					//fmt.Println(from, " ", nonce, " < ", state.Nonce)
@@ -206,16 +206,20 @@ func (n *Node) loop() {
 		case mevent := <-n.subscriberEvent.MsgChan:
 			var event tetris.Event
 			event.Unmarshal(mevent.Data)
-			n.tetris.EventCh <- event
+			n.Tetris.EventCh <- event
 			//logging.Logger.Info("node receive ", mevent.MsgType, " ", mevent.From)
 		case mtx := <-n.subscriberTx.MsgChan:
 			//logging.Logger.Info("node receive ", mtx.MsgType, " ", mtx.From, " ", string(mtx.Data))
-			n.tetris.TxsCh <- string(mtx.Data)
-		case event := <-n.tetris.SendEventCh:
+			if len(n.Tetris.TxsCh) > 9999 { //这个地方有可能阻塞。。。
+			    //fmt.Println("Txs:", len(n.Tetris.TxsCh))
+				<- n.Tetris.TxsCh
+			}
+			n.Tetris.TxsCh <- string(mtx.Data)
+		case event := <-n.Tetris.SendEventCh:
 			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeEvent, n.name, event.Marshal()})
 			n.p2p.DhtSetValue([]byte(event.Hex()), event.Marshal())
 			//logging.Logger.Info("send: ", event.Body.N)
-		case hex := <-n.tetris.RequestEventCh:
+		case hex := <-n.Tetris.RequestEventCh:
 			var event tetris.Event
 			data, err := n.p2p.DhtGetValue([]byte(hex))
 			if err != nil {
@@ -224,7 +228,7 @@ func (n *Node) loop() {
 			event.Unmarshal(data)
 			go func(event tetris.Event) {
 				time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
-				n.tetris.ParentEventCh <- event
+				n.Tetris.ParentEventCh <- event
 			}(event)
 		}
 	}
