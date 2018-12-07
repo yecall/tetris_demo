@@ -22,18 +22,20 @@
 package node
 
 import (
+	"errors"
+	"fmt"
+	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"fmt"
 	"github.com/yeeco/gyee/consensus/tetris"
 	"github.com/yeeco/gyee/p2p"
 	"github.com/yeeco/gyee/utils/logging"
-	"math/rand"
-	"strings"
-	"errors"
 )
+
+const AccountNumber = 100000
 
 type Block struct {
 	Tansactions []string
@@ -41,8 +43,9 @@ type Block struct {
 }
 
 type State struct {
-	Nonce   uint64
-	Balance uint64
+	Nonce      uint64
+	Balance    uint64
+	PendingTxs []string
 }
 
 type Node struct {
@@ -61,11 +64,12 @@ type Node struct {
 	subscriberEvent *p2p.Subscriber
 	subscriberTx    *p2p.Subscriber
 
-	States     map[string]*State
+	States     map[uint]*State
 	Blockchain []Block
 
 	running bool
 }
+
 
 func NewNode(id, number uint) (*Node, error) {
 	members := map[string]uint{}
@@ -95,9 +99,9 @@ func NewNode(id, number uint) (*Node, error) {
 	}
 	node.Tetris = tetris
 
-	node.States = make(map[string]*State)
-	for i := uint(0); i < number; i++ {
-		node.States[memberAddr[i]] = &State{0, 100000}
+	node.States = make(map[uint]*State)
+	for i := uint(0); i < AccountNumber; i++ {
+		node.States[i] = &State{0, 100000, []string{}}
 	}
 
 	node.Blockchain = make([]Block, 0)
@@ -150,17 +154,22 @@ func (n *Node) Stop() error {
 	n.p2p.UnRegister(n.subscriberTx)
 	n.p2p.Stop()
 	n.Tetris.Stop()
-	//logging.Logger.Info("Node ", n.name, " Stop...")
 	close(n.stop)
 	return nil
 }
 
 func (n *Node) BroadcastTransactions(rps uint, num uint) {
 	go func(rps uint, num uint) {
-		for i := uint(0); i < num; i++ {
-			to := rand.Intn(len(n.members))
+		sn := make([]uint, AccountNumber)
+		for i := uint(1); i < num; i++ {
+			from := rand.Intn(AccountNumber)
+			for from%len(n.members) != int(n.id) {
+				from = rand.Intn(AccountNumber)
+			}
+			to := rand.Intn(AccountNumber)
 			balance := rand.Intn(100)
-			data := fmt.Sprintf("%6d,%s,%d,%d", i, n.name, to, balance)
+			sn[from] = sn[from] + 1
+			data := fmt.Sprintf("%6d,%d,%d,%d", sn[from], from, to, balance)
 			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeTx, n.name, []byte(data)})
 			time.Sleep(time.Second / time.Duration(rps))
 		}
@@ -171,8 +180,6 @@ func (n *Node) BroadcastTransactions(rps uint, num uint) {
 }
 
 func (n *Node) loop() {
-	//n.wg.Add(1)
-	//defer n.wg.Done()
 	//logging.Logger.Info("Node loop...")
 	for {
 		select {
@@ -183,21 +190,41 @@ func (n *Node) loop() {
 		case output := <-n.Tetris.OutputCh:
 			states := n.States
 			block := Block{make([]string, 0), time.Now()}
-			//fmt.Println("new block")
 			for _, tx := range output.Tx {
 				strs := strings.Split(tx, ",")
 				nonce, _ := strconv.ParseUint(strings.TrimSpace(strs[0]), 10, 64)
-				from := strs[1]
-				to := strs[2]
+				from, _ := strconv.ParseUint(strings.TrimSpace(strs[1]), 10, 32)
+				to, _ := strconv.ParseUint(strings.TrimSpace(strs[2]), 10, 32)
 				balance, _ := strconv.ParseUint(strs[3], 10, 64)
-				//fmt.Println(string(tx), " ", strs, " ", nonce, " ", from, " ", to, " ", balance)
-				if nonce > states[from].Nonce {
-					states[from].Nonce = nonce
-					states[from].Balance -= balance
-					states[to].Balance += balance
-					block.Tansactions = append(block.Tansactions, string(tx))
+
+				if nonce > states[uint(from)].Nonce {
+					if nonce == states[uint(from)].Nonce+1 {
+						states[uint(from)].Nonce = nonce
+						states[uint(from)].Balance -= balance
+						states[uint(to)].Balance += balance
+						block.Tansactions = append(block.Tansactions, string(tx))
+						for _, ptx := range states[uint(from)].PendingTxs {
+							strs := strings.Split(ptx, ",")
+							nonce, _ := strconv.ParseUint(strings.TrimSpace(strs[0]), 10, 64)
+							from, _ := strconv.ParseUint(strings.TrimSpace(strs[1]), 10, 32)
+							to, _ := strconv.ParseUint(strings.TrimSpace(strs[2]), 10, 32)
+							balance, _ := strconv.ParseUint(strs[3], 10, 64)
+							if nonce == states[uint(from)].Nonce+1 {
+								states[uint(from)].Nonce = nonce
+								states[uint(from)].Balance -= balance
+								states[uint(to)].Balance += balance
+								block.Tansactions = append(block.Tansactions, string(tx))
+								states[uint(from)].PendingTxs = states[uint(from)].PendingTxs[1:]
+							} else {
+								break
+							}
+						}
+					} else {
+						states[uint(from)].PendingTxs = append(states[uint(from)].PendingTxs, tx)
+					}
+
 				} else {
-					//fmt.Println(from, " ", nonce, " < ", state.Nonce)
+					//fmt.Println(from, " ", nonce, " < ", states[uint(from)].Nonce)
 				}
 			}
 			n.Blockchain = append(n.Blockchain, block)
@@ -206,15 +233,21 @@ func (n *Node) loop() {
 		case mevent := <-n.subscriberEvent.MsgChan:
 			var event tetris.Event
 			event.Unmarshal(mevent.Data)
-			n.Tetris.EventCh <- event
+			if len(n.Tetris.EventCh) < 100 { //这个地方有可能阻塞。。。
+				n.Tetris.EventCh <- event
+			} else {
+				//fmt.Println("EventCh:", len(n.Tetris.EventCh))
+			}
+
 			//logging.Logger.Info("node receive ", mevent.MsgType, " ", mevent.From)
 		case mtx := <-n.subscriberTx.MsgChan:
 			//logging.Logger.Info("node receive ", mtx.MsgType, " ", mtx.From, " ", string(mtx.Data))
-			if len(n.Tetris.TxsCh) > 9999 { //这个地方有可能阻塞。。。
-			    //fmt.Println("Txs:", len(n.Tetris.TxsCh))
-				<- n.Tetris.TxsCh
-			}
+			//if len(n.Tetris.TxsCh) < 10000 { //这个地方有可能阻塞。。。
 			n.Tetris.TxsCh <- string(mtx.Data)
+			//} else {
+			//	//fmt.Println("Txs:", len(n.Tetris.TxsCh))
+			//}
+
 		case event := <-n.Tetris.SendEventCh:
 			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeEvent, n.name, event.Marshal()})
 			n.p2p.DhtSetValue([]byte(event.Hex()), event.Marshal())

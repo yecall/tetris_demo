@@ -22,16 +22,12 @@
 package main
 
 import (
-	"os"
-	"runtime"
-	"sync"
-
 	"fmt"
 	"math/rand"
-	//"os/signal"
+	"os"
 	"reflect"
-	"strconv"
-	//"syscall"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/urfave/cli"
@@ -93,6 +89,9 @@ func demo(ctx *cli.Context) error {
 	for i := uint(0); i < nodeNumber; i++ {
 		nodes[i], _ = node.NewNode(i, nodeNumber)
 		nodes[i].Start(&wg)
+	}
+
+	for i := uint(0); i < nodeNumber; i++ {
 		nodes[i].BroadcastTransactions(rps, txsNumber)
 	}
 
@@ -136,6 +135,7 @@ func demo(ctx *cli.Context) error {
 		}
 	}()
 
+	//For test
 	//go func() {
 	//	sigc := make(chan os.Signal, 1)
 	//	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
@@ -155,8 +155,11 @@ func demo(ctx *cli.Context) error {
 
 	fmt.Println("\n")
 	fmt.Print("                      ")
+	acc := []int{}
+
 	for j := uint(0); j < nodeNumber; j++ {
-		fmt.Print("balance", j, "  ")
+		acc = append(acc, rand.Intn(node.AccountNumber))
+		fmt.Printf("Acc%-7d", acc[j])
 	}
 	fmt.Println("")
 
@@ -165,7 +168,7 @@ func demo(ctx *cli.Context) error {
 		h := len(nodes[i].Blockchain)
 		fmt.Printf("%s%-2d%s%3d   ", "Node:", i, " Height:", h)
 		for j := uint(0); j < nodeNumber; j++ {
-			state := states[strconv.Itoa(int(j))]
+			state := states[uint(acc[j])]
 			fmt.Printf("%7d   ", state.Balance)
 		}
 		fmt.Println()
