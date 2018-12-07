@@ -65,6 +65,6 @@ We can see at the same height of 191, every randomly selected account's state of
 
 2. The demo mainly show the performance of consensus computing, we omitted all the signature/verification of events and txs.
 
-3. We simulated the p2p network with 50ms message delay and 10% message lost.
+3. We simulated the p2p network with 100ms message delay and 10% message lost.
 
  
