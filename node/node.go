@@ -158,6 +158,13 @@ func (n *Node) Stop() error {
 	return nil
 }
 
+func (n *Node) Running() bool {
+	n.lock.Lock()
+	defer n.lock.Unlock()
+
+	return n.running
+}
+
 func (n *Node) BroadcastTransactions(rps uint, num uint) {
 	go func(rps uint, num uint) {
 		sn := make([]uint, AccountNumber)

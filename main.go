@@ -130,12 +130,13 @@ func demo(ctx *cli.Context) error {
 
 	go func() { //模拟crash几个节点
 		for c := uint(0); c < crashNumber; c++ {
-			time.Sleep(time.Duration(rand.Intn(3000)+2000) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(2000)+2000) * time.Millisecond)
 			cno := rand.Intn(int(nodeNumber))
-			for cno == 0 { //节点0要打印统计数据，避免crash
+			for cno == 0 || !nodes[cno].Running() { //节点0要打印统计数据，避免crash
 				cno = rand.Intn(int(nodeNumber))
 			}
 			nodes[cno].Stop()
+			fmt.Println("Node", cno, "stopped!")
 		}
 	}()
 
