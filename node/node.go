@@ -35,7 +35,7 @@ import (
 	"github.com/yeeco/gyee/utils/logging"
 )
 
-const AccountNumber = 100000
+const AccountNumber = 10000
 
 type Block struct {
 	Tansactions []string
