@@ -21,7 +21,7 @@ go run main.go
 
 //Several parameters can be set:  
 -n=10       //numbers of nodes to simulate, default 10  
--tx=20000   //numbers of transactions every node issue, default 30000  
+-tx=500000   //numbers of transactions total issue, default 500000  
 -c=3        //numbers of nodes will crash during the test at random time, default 0. 
             //If c>n/3, then remain nodes can not reach consensus.
 ```

@@ -30,7 +30,6 @@ import (
 	"sync"
 	"time"
 
-
 	"github.com/yeeco/gyee/consensus/tetris"
 	"github.com/yeeco/gyee/p2p"
 	"github.com/yeeco/gyee/utils/logging"
@@ -172,7 +171,7 @@ func (n *Node) BroadcastTransactions(rps uint, num uint) {
 			sn[from] = sn[from] + 1
 			data := fmt.Sprintf("%6d,%d,%d,%d", sn[from], from, to, balance)
 			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeTx, n.name, []byte(data)})
-			time.Sleep(time.Second / time.Duration(rps))
+			time.Sleep(time.Second / time.Duration(2*rps))
 		}
 		time.Sleep(1 * time.Second)
 		n.Stop()

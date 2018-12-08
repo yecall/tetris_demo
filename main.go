@@ -56,7 +56,7 @@ func init() {
 		cli.UintFlag{
 			Name:        "txsnum, tx",
 			Usage:       "Demo transactions number",
-			Value:       50000,
+			Value:       500000,
 			Destination: &txsNumber,
 		},
 		cli.UintFlag{
@@ -68,7 +68,7 @@ func init() {
 		cli.UintFlag{
 			Name:        "request, rps",
 			Usage:       "Demo transactions requests per second",
-			Value:       5000,
+			Value:       40000,
 			Destination: &rps,
 		},
 	}
@@ -92,7 +92,7 @@ func demo(ctx *cli.Context) error {
 	}
 
 	for i := uint(0); i < nodeNumber; i++ {
-		nodes[i].BroadcastTransactions(rps, txsNumber)
+		nodes[i].BroadcastTransactions(rps/nodeNumber, txsNumber/nodeNumber)
 	}
 
 	go func() {
