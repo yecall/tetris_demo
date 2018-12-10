@@ -1,7 +1,7 @@
 # tetris_demo
 Tetris Demo
 
-This is a demo for Tetris algorithm. 
+This is a demo for [Tetris](https://arxiv.org/pdf/1811.08614.pdf) algorithm.  
 
 The demo simulate N nodes on a single machine, and 100000 accounts with initial balance of 100000, and every node issue transactions to transfer random tokens from random account to random other account. 
 
