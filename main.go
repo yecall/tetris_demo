@@ -41,6 +41,7 @@ var (
 	txsNumber   uint
 	crashNumber uint
 	rps         uint
+	signMessage bool
 	nodes       []*node.Node
 	wg          sync.WaitGroup
 )
@@ -65,6 +66,11 @@ func init() {
 			Value:       0,
 			Destination: &crashNumber,
 		},
+		cli.BoolFlag{
+			Name:        "sign, s",
+			Usage:       "Sign and verify the message",
+			Destination: &signMessage,
+		},
 		cli.UintFlag{
 			Name:        "request, rps",
 			Usage:       "Demo transactions requests per second",
@@ -87,7 +93,7 @@ func demo(ctx *cli.Context) error {
 	nodes = make([]*node.Node, nodeNumber)
 
 	for i := uint(0); i < nodeNumber; i++ {
-		nodes[i], _ = node.NewNode(i, nodeNumber)
+		nodes[i], _ = node.NewNode(i, nodeNumber, signMessage)
 		nodes[i].Start(&wg)
 	}
 
