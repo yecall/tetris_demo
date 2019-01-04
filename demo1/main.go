@@ -32,7 +32,7 @@ import (
 
 	"github.com/urfave/cli"
 	"github.com/yeeco/gyee/utils/logging"
-	"github.com/yeeco/tetris_demo/node"
+	"github.com/yeeco/tetris_demo/demo1/node"
 )
 
 var (

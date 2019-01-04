@@ -22,24 +22,21 @@
 package node
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/rand"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	crand "crypto/rand"
-	"math/big"
-
-	"github.com/yeeco/gyee/consensus/tetris"
-	"github.com/yeeco/gyee/crypto/secp256k1"
+	"encoding/hex"
+	"github.com/yeeco/gyee/common"
+	"github.com/yeeco/gyee/consensus/tetris2"
+	"github.com/yeeco/gyee/crypto"
 	"github.com/yeeco/gyee/p2p"
 	"github.com/yeeco/gyee/utils/logging"
-	"github.com/yeeco/gyee/crypto/hash"
 )
 
 const AccountNumber = 10000
@@ -52,17 +49,16 @@ type Block struct {
 type State struct {
 	Nonce      uint64
 	Balance    uint64
-	PendingTxs []string
+	PendingTxs []common.Hash
 }
 
 type Node struct {
-	id         uint
-	name       string //for test purpose
-	members    map[string]uint
-	memberAddr map[uint]string
+	id      uint
+	name    string //for test purpose
+	members []string
 
 	p2p    p2p.Service
-	Tetris *tetris.Tetris
+	Tetris *tetris2.Tetris
 	lock   sync.RWMutex
 	wg     *sync.WaitGroup
 	Report chan bool
@@ -75,35 +71,37 @@ type Node struct {
 	Blockchain []Block
 
 	running bool
-
-	sign    bool
-	pubkey  []byte
-	prikey  []byte
 }
 
-func NewNode(id, number uint, signMsg bool) (*Node, error) {
-	members := map[string]uint{}
-	memberAddr := map[uint]string{}
+func NewNode(id, number uint) (*Node, error) {
+	members := make([]string, number)
+
 	for i := uint(0); i < number; i++ {
-		members[strconv.Itoa(int(i))] = i
-		memberAddr[i] = strconv.Itoa(int(i))
+		s := strconv.Itoa(int(i))
+		if i<10 {
+			s = "0" + s
+		}
+		members[i] = hex.EncodeToString([]byte(s))
+		for j := 0; j < 5; j++ {
+			members[i] = members[i] + members[i]
+		}
 	}
 
 	node := &Node{
-		id:         id,
-		name:       memberAddr[id],
-		members:    members,
-		memberAddr: memberAddr,
-		running:    false,
+		id:      id,
+		name:    members[id],
+		members: members,
+		running: false,
 	}
 
 	p2p, err := p2p.NewInmemService()
+
 	if err != nil {
 		logging.Logger.Panic(err)
 	}
 	node.p2p = p2p
 
-	tetris, err := tetris.NewTetris(nil, members, 0, memberAddr[id])
+	tetris, err := tetris2.NewTetris(node, node.name, members, 0)
 	if err != nil {
 		logging.Logger.Fatal("create tetris err ", err)
 	}
@@ -111,7 +109,7 @@ func NewNode(id, number uint, signMsg bool) (*Node, error) {
 
 	node.States = make(map[uint]*State)
 	for i := uint(0); i < AccountNumber; i++ {
-		node.States[i] = &State{0, 100000, []string{}}
+		node.States[i] = &State{0, 100000, []common.Hash{}}
 	}
 
 	node.Blockchain = make([]Block, 0)
@@ -119,12 +117,8 @@ func NewNode(id, number uint, signMsg bool) (*Node, error) {
 	node.stop = make(chan struct{})
 	node.Report = make(chan bool)
 
-	node.sign = signMsg
-	node.pubkey, node.prikey = generateKeyPair()
-
 	return node, nil
 }
-
 
 func (n *Node) Start(wg *sync.WaitGroup) error {
 	n.lock.Lock()
@@ -138,11 +132,13 @@ func (n *Node) Start(wg *sync.WaitGroup) error {
 
 	n.wg = wg
 	n.wg.Add(1)
+
+	n.p2p.Start()
 	n.subscriberEvent = p2p.NewSubscriber(n, make(chan p2p.Message), p2p.MessageTypeEvent)
 	n.subscriberTx = p2p.NewSubscriber(n, make(chan p2p.Message), p2p.MessageTypeTx)
 	n.p2p.Register(n.subscriberEvent)
 	n.p2p.Register(n.subscriberTx)
-	n.p2p.Start()
+
 	n.Tetris.Start()
 
 	go n.loop()
@@ -191,17 +187,13 @@ func (n *Node) BroadcastTransactions(rps uint, num uint) {
 			to := rand.Intn(AccountNumber)
 			balance := rand.Intn(100)
 			sn[from] = sn[from] + 1
-			tx := fmt.Sprintf("%6d,%d,%d,%d", sn[from], from, to, balance)
-			txData := []byte(tx)
 
-           if n.sign {
-           	    txHash := hash.Sha3256([]byte(tx))
-           	    sig, err := secp256k1.Sign(txHash, n.prikey)
-           	    if err != nil {
-           	    	fmt.Println("Sign error", err)
-				}
-				txData = append(txData, sig...)
-		   }
+			txData := make([]byte, 32)
+			binary.BigEndian.PutUint64(txData[0:8], uint64(sn[from]))
+			binary.BigEndian.PutUint64(txData[8:16], uint64(from))
+			binary.BigEndian.PutUint64(txData[16:24], uint64(to))
+			binary.BigEndian.PutUint64(txData[24:32], uint64(balance))
+
 			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeTx, n.name, nil, txData})
 			time.Sleep(time.Second / time.Duration(2*rps))
 		}
@@ -223,29 +215,27 @@ func (n *Node) loop() {
 			states := n.States
 			block := Block{make([]string, 0), time.Now()}
 			for _, tx := range output.Tx {
-				strs := strings.Split(tx, ",")
-				nonce, _ := strconv.ParseUint(strings.TrimSpace(strs[0]), 10, 64)
-				from, _ := strconv.ParseUint(strings.TrimSpace(strs[1]), 10, 32)
-				to, _ := strconv.ParseUint(strings.TrimSpace(strs[2]), 10, 32)
-				balance, _ := strconv.ParseUint(strs[3], 10, 64)
+				nonce := binary.BigEndian.Uint64(tx[0:8])
+				from := binary.BigEndian.Uint64(tx[8:16])
+				to := binary.BigEndian.Uint64(tx[16:24])
+				balance := binary.BigEndian.Uint64(tx[24:32])
 
 				if nonce > states[uint(from)].Nonce {
 					if nonce == states[uint(from)].Nonce+1 {
 						states[uint(from)].Nonce = nonce
 						states[uint(from)].Balance -= balance
 						states[uint(to)].Balance += balance
-						block.Tansactions = append(block.Tansactions, string(tx))
+						block.Tansactions = append(block.Tansactions, string(tx[:]))
 						for _, ptx := range states[uint(from)].PendingTxs {
-							strs := strings.Split(ptx, ",")
-							nonce, _ := strconv.ParseUint(strings.TrimSpace(strs[0]), 10, 64)
-							from, _ := strconv.ParseUint(strings.TrimSpace(strs[1]), 10, 32)
-							to, _ := strconv.ParseUint(strings.TrimSpace(strs[2]), 10, 32)
-							balance, _ := strconv.ParseUint(strs[3], 10, 64)
+							nonce := binary.BigEndian.Uint64(ptx[0:8])
+							from := binary.BigEndian.Uint64(ptx[8:16])
+							to := binary.BigEndian.Uint64(ptx[16:24])
+							balance := binary.BigEndian.Uint64(ptx[24:32])
 							if nonce == states[uint(from)].Nonce+1 {
 								states[uint(from)].Nonce = nonce
 								states[uint(from)].Balance -= balance
 								states[uint(to)].Balance += balance
-								block.Tansactions = append(block.Tansactions, string(tx))
+								block.Tansactions = append(block.Tansactions, string(ptx[:]))
 								states[uint(from)].PendingTxs = states[uint(from)].PendingTxs[1:]
 							} else {
 								break
@@ -263,25 +253,10 @@ func (n *Node) loop() {
 			n.States = states
 			n.Report <- true
 		case mevent := <-n.subscriberEvent.MsgChan:
-			var event tetris.Event
 			data := mevent.Data
-			if n.sign {
-				sig := data[len(data)-65:]
-				data = data[:len(data)-65]
-				eHash := hash.Sha3256(data)
-				key, err := secp256k1.RecoverPubkey(eHash, sig)
-				if err != nil {
-					fmt.Println("RecoverPubkey error", err)
-				}
-				v := secp256k1.VerifySignature(key, eHash, sig[0:64])
-				if !v {
-					fmt.Println("Verify transaction fail!")
-				}
-			}
 
-			event.Unmarshal(data)
 			if len(n.Tetris.EventCh) < 100 { //这个地方有可能阻塞。。。
-				n.Tetris.EventCh <- event
+				n.Tetris.EventCh <- data
 			} else {
 				//fmt.Println("EventCh:", len(n.Tetris.EventCh))
 			}
@@ -290,102 +265,84 @@ func (n *Node) loop() {
 		case mtx := <-n.subscriberTx.MsgChan:
 			//logging.Logger.Info("node receive ", mtx.MsgType, " ", mtx.From, " ", string(mtx.Data))
 			//if len(n.Tetris.TxsCh) < 10000 { //这个地方有可能阻塞。。。
-			data := mtx.Data
-			if n.sign {
-				sig := data[len(data)-65:]
-				data = data[:len(data)-65]
-				txHash := hash.Sha3256(data)
-				key, err := secp256k1.RecoverPubkey(txHash, sig)
-				if err != nil {
-					fmt.Println("RecoverPubkey error", err)
-				}
-				v := secp256k1.VerifySignature(key, txHash, sig[0:64])
-				if !v {
-					fmt.Println("Verify transaction fail!")
-				}
-			}
-			n.Tetris.TxsCh <- string(data)
+			var data common.Hash
+			copy(data[:], mtx.Data)
+			n.Tetris.TxsCh <- data
 			//} else {
 			//	//fmt.Println("Txs:", len(n.Tetris.TxsCh))
 			//}
 
 		case event := <-n.Tetris.SendEventCh:
-			eData := event.Marshal()
-			if n.sign {
-				eHash := hash.Sha3256(eData)
-				sig, err := secp256k1.Sign(eHash, n.prikey)
-				if err != nil {
-					fmt.Println("Sign error", err)
-				}
-				eData = append(eData, sig...)
-			}
-			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeEvent, n.name, nil, eData})
-			n.p2p.DhtSetValue([]byte(event.Hex()), eData)
+			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeEvent, n.name, nil, event})
+			h := sha256.Sum256(event)
+			n.p2p.DhtSetValue(h[:], event)
 			//logging.Logger.Info("send: ", event.Body.N)
-		case hex := <-n.Tetris.RequestEventCh:
-			var event tetris.Event
-			data, err := n.p2p.DhtGetValue([]byte(hex))
+		case hash := <-n.Tetris.RequestEventCh:
+			data, err := n.p2p.DhtGetValue(hash[:])
 
 			if err != nil {
 				fmt.Println("dhtGetValue error")
 			}
-			if n.sign {
-				sig := data[len(data)-65:]
-				data = data[:len(data)-65]
-				eHash := hash.Sha3256(data)
-				key, err := secp256k1.RecoverPubkey(eHash, sig)
-				if err != nil {
-					fmt.Println("RecoverPubkey error", err)
-				}
-				v := secp256k1.VerifySignature(key, eHash, sig[0:64])
-				if !v {
-					fmt.Println("Verify signature fail!")
-				}
-			}
-			event.Unmarshal(data)
-			go func(event tetris.Event) {
+
+			go func(event []byte) {
 				time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
-				n.Tetris.ParentEventCh <- event
-			}(event)
+				n.Tetris.ParentEventCh <- data
+			}(data)
 		}
 	}
 }
 
-
-func generateKeyPair() (pubkey, privkey []byte) {
-	key, err := ecdsa.GenerateKey(secp256k1.S256(), crand.Reader)
-	if err != nil {
-		panic(err)
-	}
-	pubkey = elliptic.Marshal(secp256k1.S256(), key.X, key.Y)
-	return pubkey, paddedBigBytes(key.D, 32)
+//mock_core, 实现ICORE
+func (n *Node) GetSigner() crypto.Signer {
+	return NewMockSigner()
 }
 
-// paddedBigBytes encodes a big integer as a big-endian byte slice.
-func paddedBigBytes(bigint *big.Int, n int) []byte {
-	if bigint.BitLen()/8 >= n {
-		return bigint.Bytes()
-	}
-	ret := make([]byte, n)
-	readBits(bigint, ret)
-	return ret
+func (n *Node) GetPrivateKeyOfDefaultAccount() ([]byte, error) { //从node的accountManager取
+	return hex.DecodeString(n.name)
 }
 
-const (
-	// number of bits in a big.Word
-	wordBits = 32 << (uint64(^big.Word(0)) >> 63)
-	// number of bytes in a big.Word
-	wordBytes = wordBits / 8
-)
+func (n *Node) AddressFromPublicKey(publicKey []byte) ([]byte, error) {
+	return publicKey, nil
+}
 
-// readBits encodes the absolute value of bigint as big-endian bytes.
-func readBits(bigint *big.Int, buf []byte) {
-	i := len(buf)
-	for _, d := range bigint.Bits() {
-		for j := 0; j < wordBytes && i > 0; j++ {
-			i--
-			buf[i] = byte(d)
-			d >>= 8
-		}
+type MockSigner struct {
+	algrithm   crypto.Algorithm
+	privateKey []byte
+}
+
+func NewMockSigner() *MockSigner {
+	signer := &MockSigner{
+		algrithm: crypto.ALG_UNKNOWN,
 	}
+	return signer
+}
+
+func (m *MockSigner) Algorithm() crypto.Algorithm {
+	return m.algrithm
+}
+
+func (m *MockSigner) InitSigner(privateKey []byte) error {
+	m.privateKey = privateKey
+	return nil
+}
+
+func (m *MockSigner) Sign(data []byte) (signature *crypto.Signature, err error) {
+	if m.privateKey == nil {
+		logging.Logger.Warn("privateKey has not setted!")
+		return nil, errors.New("privateKey has not setted")
+	}
+
+	signature = &crypto.Signature{
+		Algorithm: m.Algorithm(),
+		Signature: m.privateKey,
+	}
+	return signature, nil
+}
+
+func (m *MockSigner) RecoverPublicKey(data []byte, signature *crypto.Signature) (publicKey []byte, err error) {
+	return signature.Signature, nil
+}
+
+func (m *MockSigner) Verify(publicKey []byte, data []byte, signature *crypto.Signature) bool {
+	return true
 }
