@@ -78,7 +78,7 @@ func NewNode(id, number uint) (*Node, error) {
 
 	for i := uint(0); i < number; i++ {
 		s := strconv.Itoa(int(i))
-		if i<10 {
+		if i < 10 {
 			s = "0" + s
 		}
 		members[i] = hex.EncodeToString([]byte(s))
@@ -133,11 +133,11 @@ func (n *Node) Start(wg *sync.WaitGroup) error {
 	n.wg = wg
 	n.wg.Add(1)
 
-	n.p2p.Start()
 	n.subscriberEvent = p2p.NewSubscriber(n, make(chan p2p.Message), p2p.MessageTypeEvent)
 	n.subscriberTx = p2p.NewSubscriber(n, make(chan p2p.Message), p2p.MessageTypeTx)
 	n.p2p.Register(n.subscriberEvent)
 	n.p2p.Register(n.subscriberTx)
+	n.p2p.Start()
 
 	n.Tetris.Start()
 
@@ -208,7 +208,7 @@ func (n *Node) loop() {
 	for {
 		select {
 		case <-n.stop:
-			//logging.Logger.Info("Node loop end.")
+			logging.Logger.Info("Node loop end.", n.name[0:4])
 			n.wg.Done()
 			return
 		case output := <-n.Tetris.OutputCh:
@@ -255,11 +255,15 @@ func (n *Node) loop() {
 		case mevent := <-n.subscriberEvent.MsgChan:
 			data := mevent.Data
 
-			if len(n.Tetris.EventCh) < 100 { //这个地方有可能阻塞。。。
+			//if len(n.Tetris.EventCh) < 100 { //这个地方有可能阻塞。。。
+			//阻塞原因，这个event被tetris收到后，如果可以触发大量的共识，tetris中是递归的，导致outputCh不够用，但这儿loop被阻塞在这儿无法处理outputCh
+			go func(data []byte){
 				n.Tetris.EventCh <- data
-			} else {
-				//fmt.Println("EventCh:", len(n.Tetris.EventCh))
-			}
+			}(data)
+
+			//} else {
+			//fmt.Println("EventCh:", len(n.Tetris.EventCh))
+			//}
 
 			//logging.Logger.Info("node receive ", mevent.MsgType, " ", mevent.From)
 		case mtx := <-n.subscriberTx.MsgChan:
@@ -268,7 +272,7 @@ func (n *Node) loop() {
 			var data common.Hash
 			copy(data[:], mtx.Data)
 			n.Tetris.TxsCh <- data
-			//} else {
+			//} //else {
 			//	//fmt.Println("Txs:", len(n.Tetris.TxsCh))
 			//}
 
@@ -276,6 +280,7 @@ func (n *Node) loop() {
 			n.p2p.BroadcastMessage(p2p.Message{p2p.MessageTypeEvent, n.name, nil, event})
 			h := sha256.Sum256(event)
 			n.p2p.DhtSetValue(h[:], event)
+
 			//logging.Logger.Info("send: ", event.Body.N)
 		case hash := <-n.Tetris.RequestEventCh:
 			data, err := n.p2p.DhtGetValue(hash[:])

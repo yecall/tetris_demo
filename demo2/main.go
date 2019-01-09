@@ -27,6 +27,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -57,7 +58,7 @@ func init() {
 		cli.UintFlag{
 			Name:        "txsnum, tx",
 			Usage:       "Demo transactions number",
-			Value:       250000,
+			Value:       550000,
 			Destination: &txsNumber,
 		},
 		cli.UintFlag{
@@ -69,7 +70,7 @@ func init() {
 		cli.UintFlag{
 			Name:        "request, rps",
 			Usage:       "Demo transactions requests per second",
-			Value:       10000,
+			Value:       40000,
 			Destination: &rps,
 		},
 	}
@@ -78,6 +79,9 @@ func init() {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	cf, _ := os.Create("cpuprofile.prof")
+	pprof.StartCPUProfile(cf)
+	defer pprof.StopCPUProfile()
 
 	if err := app.Run(os.Args); err != nil {
 		logging.Logger.Fatal(err)
@@ -90,6 +94,8 @@ func demo(ctx *cli.Context) error {
 	for i := uint(0); i < nodeNumber; i++ {
 		nodes[i], _ = node.NewNode(i, nodeNumber)
 		nodes[i].Start(&wg)
+		//nodes[i].BroadcastTransactions(rps/nodeNumber, txsNumber/nodeNumber)
+		//time.Sleep(3*time.Second)
 	}
 
 	for i := uint(0); i < nodeNumber; i++ {
@@ -122,6 +128,8 @@ func demo(ctx *cli.Context) error {
 					if h > 0 {
 						str := fmt.Sprint("(", len(nodes[i].Blockchain[h-1].Tansactions), ")")
 						fmt.Printf("%3d%-7s", h, str)
+					} else {
+						fmt.Printf("          ")
 					}
 				}
 			}
@@ -130,9 +138,9 @@ func demo(ctx *cli.Context) error {
 	}()
 
 	go func() { //模拟crash几个节点
-	    time.Sleep(5*time.Second)
+		time.Sleep(145 * time.Second)
 		for c := uint(0); c < crashNumber; c++ {
-			time.Sleep(time.Duration(rand.Intn(3000)+2000) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(2000)+3000) * time.Millisecond)
 			cno := rand.Intn(int(nodeNumber))
 			for cno == 0 || !nodes[cno].Running() { //节点0要打印统计数据，避免crash
 				cno = rand.Intn(int(nodeNumber))
@@ -140,6 +148,10 @@ func demo(ctx *cli.Context) error {
 			nodes[cno].Stop()
 			fmt.Println("Node", cno, "stopped!")
 		}
+		//stacktrace := make([]byte, 81920)
+		//length := runtime.Stack(stacktrace, true)
+		//fmt.Println(string(stacktrace[:length]))
+
 	}()
 
 	wg.Wait()
@@ -180,6 +192,8 @@ func demo(ctx *cli.Context) error {
 
 	fmt.Println()
 	fmt.Println("Txs confirmed:", txsum, " Time:", interval.Seconds(), " Tps:", int(float64(txsum)/interval.Seconds()), "\n")
+	fmt.Println("Traffic In/s:", nodes[0].Tetris.TrafficIn / int(interval.Seconds()), " Traffic out/s:", nodes[0].Tetris.TrafficOut / int(interval.Seconds()))
+    fmt.Println()
 
 	return nil
 }
