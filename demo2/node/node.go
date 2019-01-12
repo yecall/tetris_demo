@@ -154,6 +154,9 @@ func (n *Node) Stop() error {
 		return nil
 	}
 	n.running = false
+	n.p2p.UnRegister(n.subscriberEvent)
+	n.p2p.UnRegister(n.subscriberTx)
+
 	for len(n.subscriberEvent.MsgChan) > 0 {
 		<-n.subscriberEvent.MsgChan
 	}
@@ -161,8 +164,6 @@ func (n *Node) Stop() error {
 		<-n.subscriberTx.MsgChan
 	}
 
-	n.p2p.UnRegister(n.subscriberEvent)
-	n.p2p.UnRegister(n.subscriberTx)
 	n.p2p.Stop()
 	n.Tetris.Stop()
 	close(n.stop)
@@ -269,9 +270,13 @@ func (n *Node) loop() {
 		case mtx := <-n.subscriberTx.MsgChan:
 			//logging.Logger.Info("node receive ", mtx.MsgType, " ", mtx.From, " ", string(mtx.Data))
 			//if len(n.Tetris.TxsCh) < 10000 { //这个地方有可能阻塞。。。
+
 			var data common.Hash
 			copy(data[:], mtx.Data)
-			n.Tetris.TxsCh <- data
+			go func(data common.Hash) {
+				n.Tetris.TxsCh <- data
+			}(data)
+
 			//} //else {
 			//	//fmt.Println("Txs:", len(n.Tetris.TxsCh))
 			//}
@@ -286,11 +291,11 @@ func (n *Node) loop() {
 			data, err := n.p2p.DhtGetValue(hash[:])
 
 			if err != nil {
-				fmt.Println("dhtGetValue error")
+				fmt.Println("dhtGetValue error", err, hash[:])
 			}
 
 			go func(event []byte) {
-				time.Sleep(time.Duration(rand.Intn(100)) * time.Millisecond)
+				time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond)
 				n.Tetris.ParentEventCh <- data
 			}(data)
 		}

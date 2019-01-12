@@ -34,6 +34,8 @@ import (
 	"github.com/urfave/cli"
 	"github.com/yeeco/gyee/utils/logging"
 	"github.com/yeeco/tetris_demo/demo2/node"
+	"os/signal"
+	"syscall"
 )
 
 var (
@@ -58,7 +60,7 @@ func init() {
 		cli.UintFlag{
 			Name:        "txsnum, tx",
 			Usage:       "Demo transactions number",
-			Value:       550000,
+			Value:       1550000,
 			Destination: &txsNumber,
 		},
 		cli.UintFlag{
@@ -93,14 +95,20 @@ func demo(ctx *cli.Context) error {
 
 	for i := uint(0); i < nodeNumber; i++ {
 		nodes[i], _ = node.NewNode(i, nodeNumber)
-		nodes[i].Start(&wg)
-		//nodes[i].BroadcastTransactions(rps/nodeNumber, txsNumber/nodeNumber)
-		//time.Sleep(3*time.Second)
 	}
 
-	for i := uint(0); i < nodeNumber; i++ {
-		nodes[i].BroadcastTransactions(rps/nodeNumber, txsNumber/nodeNumber)
-	}
+	go func() {
+		for i := uint(0); i < nodeNumber; i++ {
+			nodes[i].Start(&wg)
+			nodes[i].BroadcastTransactions(rps/nodeNumber, txsNumber/nodeNumber)
+			time.Sleep(2*time.Second)
+		}
+	}()
+
+
+	//for i := uint(0); i < nodeNumber; i++ {
+	//	nodes[i].BroadcastTransactions(rps/nodeNumber, txsNumber/nodeNumber)
+	//}
 
 	go func() {
 		cases := make([]reflect.SelectCase, nodeNumber)
@@ -138,9 +146,9 @@ func demo(ctx *cli.Context) error {
 	}()
 
 	go func() { //模拟crash几个节点
-		time.Sleep(145 * time.Second)
+		time.Sleep(25 * time.Second)
 		for c := uint(0); c < crashNumber; c++ {
-			time.Sleep(time.Duration(rand.Intn(2000)+3000) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(2000)+2000) * time.Millisecond)
 			cno := rand.Intn(int(nodeNumber))
 			for cno == 0 || !nodes[cno].Running() { //节点0要打印统计数据，避免crash
 				cno = rand.Intn(int(nodeNumber))
@@ -148,12 +156,28 @@ func demo(ctx *cli.Context) error {
 			nodes[cno].Stop()
 			fmt.Println("Node", cno, "stopped!")
 		}
-		//stacktrace := make([]byte, 81920)
-		//length := runtime.Stack(stacktrace, true)
-		//fmt.Println(string(stacktrace[:length]))
-
 	}()
 
+	go func() {
+		sigc := make(chan os.Signal, 1)
+		signal.Notify(sigc, syscall.SIGINFO, syscall.SIGINT, syscall.SIGTERM)
+		defer signal.Stop(sigc)
+		for {
+			s := <-sigc
+			for j := uint(0); j < nodeNumber; j++ {
+				nodes[j].Tetris.DebugPrint()
+			}
+			if s == syscall.SIGINT || s == syscall.SIGTERM {
+				//stacktrace := make([]byte, 8192)
+				//length := runtime.Stack(stacktrace, true)
+				//fmt.Println(string(stacktrace[:length]))
+				os.Exit(0)
+				break
+			}
+		}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
 	wg.Wait()
 
 	fmt.Println("\n")
