@@ -253,6 +253,9 @@ func (n *Node) loop() {
 			n.Blockchain = append(n.Blockchain, block)
 			n.States = states
 			n.Report <- true
+			if output.H == 69 && n.id == 7 {
+				n.Stop()
+			}
 		case mevent := <-n.subscriberEvent.MsgChan:
 			data := mevent.Data
 
@@ -295,7 +298,7 @@ func (n *Node) loop() {
 			}
 
 			go func(event []byte) {
-				time.Sleep(time.Duration(rand.Intn(500)) * time.Millisecond)
+				time.Sleep(time.Duration(rand.Intn(200)) * time.Millisecond)
 				n.Tetris.ParentEventCh <- data
 			}(data)
 		}
